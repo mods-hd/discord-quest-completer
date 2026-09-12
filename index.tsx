@@ -31,6 +31,7 @@ import {
     subscribeSchedulerState as subscribeOrionSchedulerState,
 } from "./orion";
 import { repairSuppressedPresence } from "./patcher";
+import { formatOrbReward, questOrbReward, totalOrbReward, type OrbReward } from "./questRewards";
 import { resolveQuestTarget } from "./questTarget";
 import type { SchedulerSnapshot } from "./schedulerMetadata";
 import { settings } from "./settings";
@@ -290,21 +291,45 @@ function statusSummary(): string {
     };
     const claimable = entries.filter(stillUnclaimed).length;
 
+    // A dashboard entry carries progress only, so the payout comes from the quest the store still
+    // holds. The task line and both totals below want the same number, so each quest is read once
+    // instead of three times.
+    const orbsById = new Map<string, OrbReward | null>();
+    for (const e of entries) {
+        let reward: OrbReward | null = null;
+        try {
+            reward = questOrbReward(store?.getQuest?.(e.id)?.config);
+        } catch {
+            reward = null;
+        }
+        orbsById.set(e.id, reward);
+    }
+
     const lines = entries.map(e => {
         const pct = e.max > 0 ? Math.min(100, (e.cur / e.max) * 100).toFixed(0) : "?";
+        const orbs = formatOrbReward(orbsById.get(e.id) ?? null);
+        const payout = orbs ? ` [${orbs}]` : "";
         const waiting = e.actionRequired === "ENROLL"
             ? ", waiting for you to accept it in Discord's Quests page"
             : "";
         const why = e.status === "FAILED" && e.reason ? `, ${e.reason}` : "";
         const reward = stillUnclaimed(e) ? ", reward not claimed yet" : "";
-        return `• ${e.name}: ${e.status} (${pct}%)${waiting}${why}${reward}`;
+        return `• ${e.name}: ${e.status} (${pct}%)${payout}${waiting}${why}${reward}`;
     });
+
+    const orbTotal = totalOrbReward([...orbsById.values()]);
+    const orbsWaiting = totalOrbReward(entries.filter(stillUnclaimed).map(e => orbsById.get(e.id) ?? null));
 
     const header = `Orion ${PLUGIN_VERSION} ${running ? "running" : "stopped"}, ${entries.length} task(s): ${breakdown}`;
     const footer = claimable > 0
         ? [`${claimable} reward(s) waiting. Claim them on Discord's Quests page, or turn on "Try to claim reward" to have Orion attempt it (claiming often triggers a captcha).`]
         : [];
-    return [header, ...lines, ...footer].join("\n");
+    // Orbs land on the account at claim time, so the total is what these tasks are worth and the
+    // second half is how much of it sits unclaimed.
+    const orbLine = orbTotal
+        ? [`Orbs: ${formatOrbReward(orbTotal)} across these task(s)${orbsWaiting ? `, ${formatOrbReward(orbsWaiting)} of it still to claim` : ""}.`]
+        : [];
+    return [header, ...lines, ...orbLine, ...footer].join("\n");
 }
 
 function formatCandidates(names: string[]): string {

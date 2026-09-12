@@ -183,6 +183,33 @@
         return Number.isNaN(e) || e > Date.now();
     };
 
+    // Orbs a quest pays out, as { orbs, premium }, or null when it pays none. Every reward entry
+    // is summed. The quantity sits on the entry and a quest can list several, so reading
+    // rewards[0] reports no Orbs at all for a quest that lists an in-game item first.
+    // premiumOrbQuantity is Discord's own Nitro figure and is sometimes absent or equal, so it
+    // falls back to the base number rather than being multiplied here.
+    const orbReward = config => {
+        const rewards = config?.rewardsConfig?.rewards;
+        if (!Array.isArray(rewards)) return null;
+        const amount = v => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+        let orbs = 0, premium = 0;
+        for (const r of rewards) {
+            const base = amount(r?.orbQuantity);
+            if (!base) continue;
+            orbs += base;
+            premium += amount(r?.premiumOrbQuantity) || base;
+        }
+        return orbs > 0 ? { orbs, premium } : null;
+    };
+
+    // The Nitro figure is only named when it differs, so a non-subscriber is not told the same
+    // number twice.
+    const fmtOrbs = reward => {
+        if (!reward) return '';
+        return reward.premium > reward.orbs ? `${reward.orbs} Orbs (${reward.premium} with Nitro)` : `${reward.orbs} Orbs`;
+    };
+
     // The server-sealed attribution blob Discord echoes back when enrolling in or claiming a
     // quest. The server issues it per quest and ships it with the quest list; the client
     // returns it unmodified. Orion sent neither sealed field, so every enrollment and claim it
@@ -501,6 +528,7 @@
                 .native-toggle:checked { background: var(--control-primary-background-default); }
                 .native-toggle:checked::after { transform: translateX(20px); }
 
+                .orb-total { display: none; padding-top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: #5865F2; text-align: center; flex-shrink: 0; }
                 .picker-actions { display: flex; gap: 10px; padding-top: 12px; flex-shrink: 0; }
                 .quest-pick-btn { flex: 1; padding: 10px; border: 1px solid; border-radius: var(--radius-sm, 8px); font-size: 13px; font-weight: 700; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; font-family: inherit; color: #fff;}
                 .quest-pick-btn.start { background-color: var(--control-connected-background-default); border-color: var(--control-connected-border-default); }
@@ -890,12 +918,17 @@
                     }
                     rewardTypes.get(rewardType).count++;
 
+                    const orbs = orbReward(q.config);
+
                     items.push({
                         id: q.id,
                         name: q.config?.messages?.questName ?? "Unknown Quest",
                         type: displayType,
                         rewardType,
                         rewardText,
+                        orbs: orbs?.orbs ?? 0,
+                        premiumOrbs: orbs?.premium ?? 0,
+                        orbText: fmtOrbs(orbs),
                         color: meta.color
                     });
                 });
@@ -903,13 +936,13 @@
                 if (!items.length) return closePicker({ selectedQuests: new Set(), autoEnroll: false, autoClaim: false, playSound: false });
 
                 const buildCard = (q) => `
-                    <label class="quest-pick" data-rt="${q.rewardType}" data-qt="${q.type}" style="border-left-color: ${q.color};">
+                    <label class="quest-pick" data-rt="${q.rewardType}" data-qt="${q.type}" data-orbs="${q.orbs}" data-premium-orbs="${q.premiumOrbs}" style="border-left-color: ${q.color};">
                         <input type="checkbox" name="quests" value="${q.id}" class="native-cb" checked>
                         <div class="task-info">
                             <div class="task-name" title="${esc(q.name)}">${esc(q.name)}</div>
                             <div class="task-meta" style="justify-content: flex-start; gap: 8px;">
                                 <span style="text-transform: uppercase; color: var(--text-subtle);">${esc(q.type)}</span>
-                                <span style="color: ${q.color};">${esc(q.rewardText)}</span>
+                                <span style="color: ${q.color};">${esc(q.orbText || q.rewardText)}</span>
                             </div>
                         </div>
                     </label>`;
@@ -950,6 +983,8 @@
                             </div>
                         </div>
 
+                        <div id="orion-orb-total" class="orb-total"></div>
+
                         <div class="picker-actions">
                             <button type="button" class="quest-pick-btn deselect" id="select-all-btn">DESELECT ALL</button>
                             <button type="submit" class="quest-pick-btn start" id="start-btn">${ICONS.BOLT} <span id="start-btn-text">START (${items.length})</span></button>
@@ -966,6 +1001,17 @@
                 const syncUI = () => {
                     const visibleCbs = getVisibleCheckboxes();
                     const totalChecked = visibleCbs.filter(cb => cb.checked).length;
+
+                    // Counts the selected quests only, so a reward filter or a deselect moves the
+                    // number. A list-wide total would stay put while the selection changed under it.
+                    const orbTotal = document.getElementById('orion-orb-total');
+                    if (orbTotal) {
+                        const picked = visibleCbs.filter(cb => cb.checked).map(cb => cb.closest('.quest-pick'));
+                        const sum = attr => picked.reduce((total, el) => total + (Number(el?.getAttribute(attr)) || 0), 0);
+                        const orbs = sum('data-orbs');
+                        orbTotal.textContent = orbs > 0 ? `${fmtOrbs({ orbs, premium: sum('data-premium-orbs') })} selected` : '';
+                        orbTotal.style.display = orbs > 0 ? 'block' : 'none';
+                    }
 
                     const startBtnText = document.getElementById('start-btn-text');
                     if (startBtnText) startBtnText.textContent = `START (${totalChecked})`;

@@ -15,7 +15,16 @@ export interface Quest {
         messages?: { questName?: string; };
         taskConfig?: TaskConfig;
         taskConfigV2?: TaskConfig;
-        rewardsConfig?: { rewards?: Array<{ type?: number; messages?: { name?: string; }; }>; };
+        rewardsConfig?: {
+            rewards?: Array<{
+                type?: number;
+                messages?: { name?: string; };
+                /** Orb payout. Discord sends orb_quantity; the store hands it over camel-cased. */
+                orbQuantity?: number | null;
+                /** The same payout for Nitro subscribers, absent on quests that pay the same. */
+                premiumOrbQuantity?: number | null;
+            }>;
+        };
     };
     userStatus?: {
         completedAt?: string;
