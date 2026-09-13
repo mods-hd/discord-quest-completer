@@ -213,16 +213,24 @@ export function getVirtualCurrencyStore(): any {
 
 /**
  * Orbs on the account. VirtualCurrencyStore holds the figure Discord's own Orb pill shows once
- * the client has fetched it, so that is read first. Before then it is null and one GET of the
- * balance endpoint fills it in. Nothing polls; this runs only when a status is asked for.
+ * the client has fetched it, so that is read first. Discord keeps it current itself: the gateway
+ * pushes VIRTUAL_CURRENCY_BALANCE_UPDATE into it and LOGIN_SUCCESS clears it, so a number there
+ * belongs to the signed-in account. Before then it is null and one GET of the balance endpoint
+ * fills it in. Nothing polls; this runs only when a status is asked for.
+ *
+ * The GET has no such guarantee, so the account is checked on both sides of the await and a
+ * switch in between discards the response.
  */
 export async function readOrbBalance(): Promise<number | null> {
-    const stored = orbBalance(getVirtualCurrencyStore()?.balance);
+    const store = getVirtualCurrencyStore();
+    const stored = orbBalance(store?.getCurrentBalance?.() ?? store?.balance);
     if (stored !== null) return stored;
 
     const API = (RestAPI as any) || findByProps("get", "post", "del");
     if (!API) throw new Error("RestAPI not found");
+    const account = getCurrentUserId();
     const res = await API.get({ url: "/users/@me/virtual-currency/balance" });
+    if (getCurrentUserId() !== account) throw new Error("the account changed during the read");
     return orbBalance(res?.body?.balance);
 }
 

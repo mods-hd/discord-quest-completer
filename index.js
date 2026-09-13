@@ -215,12 +215,20 @@
     const orbBalance = v => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
     // Orbs on the account. VirtualCurrencyStore holds the figure Discord's own Orb pill shows
-    // once the client has fetched it, so that is read first. Before then it is null and one GET
-    // of the balance endpoint fills it in. Nothing polls; this runs once when the picker opens.
+    // once the client has fetched it, so that is read first. Discord keeps it current itself:
+    // the gateway pushes VIRTUAL_CURRENCY_BALANCE_UPDATE into it and LOGIN_SUCCESS clears it,
+    // so a number there belongs to the signed-in account. Before then it is null and one GET of
+    // the balance endpoint fills it in. Nothing polls; this runs once when the picker opens.
+    // The GET has no such guarantee, so the account is checked on both sides of the await and
+    // a switch in between discards the response.
     const readOrbBalance = async () => {
-        const stored = orbBalance(Mods.OrbStore?.balance);
+        const store = Mods.OrbStore;
+        const stored = orbBalance(store?.getCurrentBalance?.() ?? store?.balance);
         if (stored !== null) return stored;
+        const account = Mods.UserStore?.getCurrentUser?.()?.id ?? null;
         const res = await Mods.API.get({ url: '/users/@me/virtual-currency/balance' });
+        const after = Mods.UserStore?.getCurrentUser?.()?.id ?? null;
+        if (after !== account) throw new Error('the account changed during the read');
         return orbBalance(res?.body?.balance);
     };
 

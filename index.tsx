@@ -265,13 +265,16 @@ async function ensureReadyStop(): Promise<string> {
 async function statusSummary(): Promise<string> {
     const running = isEngineRunning();
     const entries = readDashboard();
+    // A status with no tasks can still report the balance, and asking while nothing runs is the
+    // plain way to check it, so the early returns carry the line too.
     if (!running && entries.length === 0) {
         const outcome = getLastRunOutcome();
-        return outcome
+        const idle = outcome
             ? `Orion ${PLUGIN_VERSION} idle: ${outcome}\nUse \`/orion start\` to try again.`
             : `Orion ${PLUGIN_VERSION} idle. Use \`/orion start\` to begin.`;
+        return `${idle}\n${await balanceLine()}`;
     }
-    if (entries.length === 0) return running ? "Running. No active tasks yet." : "Idle.";
+    if (entries.length === 0) return `${running ? "Running. No active tasks yet." : "Idle."}\n${await balanceLine()}`;
 
     const tally = new Map<string, number>();
     for (const e of entries) tally.set(e.status, (tally.get(e.status) ?? 0) + 1);
@@ -330,16 +333,18 @@ async function statusSummary(): Promise<string> {
     const orbLine = orbTotal
         ? [`Orbs: ${formatOrbReward(orbTotal)} across these task(s)${orbsWaiting ? `, ${formatOrbReward(orbsWaiting)} of it still to claim` : ""}.`]
         : [];
-    // The balance may need a request, unlike everything else here, so a failed read prints its
-    // reason on that one line and leaves the rest of the status intact.
-    let balanceLine: string;
+    return [header, ...lines, ...orbLine, await balanceLine(), ...footer].join("\n");
+}
+
+// The balance may need a request, unlike everything else in a status, so a failed read prints
+// its reason on this one line and leaves the rest intact.
+async function balanceLine(): Promise<string> {
     try {
         const balance = formatOrbBalance(await readOrbBalance());
-        balanceLine = balance ? `Balance: ${balance} on the account.` : "Balance: unavailable, Discord sent no number.";
+        return balance ? `Balance: ${balance} on the account.` : "Balance: unavailable, Discord sent no number.";
     } catch (error) {
-        balanceLine = `Balance: unavailable, ${error instanceof Error ? error.message : String(error)}.`;
+        return `Balance: unavailable, ${error instanceof Error ? error.message : String(error)}.`;
     }
-    return [header, ...lines, ...orbLine, balanceLine, ...footer].join("\n");
 }
 
 function formatCandidates(names: string[]): string {
