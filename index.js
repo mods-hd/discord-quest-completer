@@ -220,12 +220,14 @@
     // so a number there belongs to the signed-in account. Before then it is null and one GET of
     // the balance endpoint fills it in. Nothing polls; this runs once when the picker opens.
     // The GET has no such guarantee, so the account is checked on both sides of the await and
-    // a switch in between discards the response.
+    // a switch in between discards the response. With no signed-in account there is nothing to
+    // check against, so the read stops before the request.
     const readOrbBalance = async () => {
         const store = Mods.OrbStore;
         const stored = orbBalance(store?.getCurrentBalance?.() ?? store?.balance);
         if (stored !== null) return stored;
         const account = Mods.UserStore?.getCurrentUser?.()?.id ?? null;
+        if (!account) throw new Error('no account is signed in');
         const res = await Mods.API.get({ url: '/users/@me/virtual-currency/balance' });
         const after = Mods.UserStore?.getCurrentUser?.()?.id ?? null;
         if (after !== account) throw new Error('the account changed during the read');

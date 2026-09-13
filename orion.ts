@@ -219,7 +219,8 @@ export function getVirtualCurrencyStore(): any {
  * fills it in. Nothing polls; this runs only when a status is asked for.
  *
  * The GET has no such guarantee, so the account is checked on both sides of the await and a
- * switch in between discards the response.
+ * switch in between discards the response. With no signed-in account there is nothing to check
+ * against, so the read stops before the request.
  */
 export async function readOrbBalance(): Promise<number | null> {
     const store = getVirtualCurrencyStore();
@@ -229,6 +230,7 @@ export async function readOrbBalance(): Promise<number | null> {
     const API = (RestAPI as any) || findByProps("get", "post", "del");
     if (!API) throw new Error("RestAPI not found");
     const account = getCurrentUserId();
+    if (!account) throw new Error("no account is signed in");
     const res = await API.get({ url: "/users/@me/virtual-currency/balance" });
     if (getCurrentUserId() !== account) throw new Error("the account changed during the read");
     return orbBalance(res?.body?.balance);
